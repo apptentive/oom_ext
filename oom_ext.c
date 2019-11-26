@@ -16,100 +16,91 @@
 
 #include <linux/notifier.h>
 
+#include <linux/oom.h>
+
 #define OOM_EXT_MBYTE 1048576
 #define OOM_EXT_FLAG_MAXPATH 256
 #define OOM_EXT_WORK_QUEUE_NAME "oom_ext"
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
-#define OLD_INSERT_AT_HEAD
-#include <linux/oom.h>
-#else
-#define OLD_INSERT_AT_HEAD , 0
-extern int register_oom_notifier(struct notifier_block *nb);
-extern int unregister_oom_notifier(struct notifier_block *nb);
-#endif
-
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Ivan Fitenko <sin@hostingnitro.com>");
+MODULE_AUTHOR("Ivan Fitenko <digitalhunger@gmail.com>");
 MODULE_DESCRIPTION("support custom actions on OOM condition");
-
-#define OOM_EXT_CTL 563 /* a random number, high enough */
-enum {OOM_EXT_VAL=1, OOM_EXT_OTHER};
 
 /* sysctl defaults */
 long gracetime = 0;   /* time in oom before panic, sec. 0 to disable */
-long resettime = 300; /* default time out of oom to consider it ended */
+long resettime = 30; /* default time out of oom to consider it ended */
 int bufsize = 32; /* emergency buffer is 32M by default. 0 to disable */
 int crashflag = 1; /* set crash flag by default, remove if oom ended */
 static char crashflag_name[OOM_EXT_FLAG_MAXPATH] = "/oomflag"; /* flag name */
 
 /* sysctl controls */
-static ctl_table oom_ext_table[] = {
+static struct ctl_table oom_ext_table[] = {
 	{
-	.ctl_name = OOM_EXT_VAL,
 	.procname = "gracetime",
 	.data = &gracetime,
 	.maxlen = sizeof(int),
 	.mode = 0644,
 	.child = NULL,
 	.proc_handler = &proc_dointvec,
-	.strategy = &sysctl_intvec,
 	},
 	{
-	.ctl_name = OOM_EXT_VAL,
 	.procname = "resettime",
 	.data = &resettime,
 	.maxlen = sizeof(int),
 	.mode = 0644,
 	.child = NULL,
 	.proc_handler = &proc_dointvec,
-	.strategy = &sysctl_intvec,
 	},
 	{
-	.ctl_name = OOM_EXT_VAL,
 	.procname = "bufsize",
 	.data = &bufsize,
 	.maxlen = sizeof(int),
 	.mode = 0644,
 	.child = NULL,
 	.proc_handler = &proc_dointvec,
-	.strategy = &sysctl_intvec,
 	},
 	{
-	.ctl_name = OOM_EXT_VAL,
 	.procname = "crashflag",
 	.data = &crashflag,
 	.maxlen = sizeof(int),
 	.mode = 0644,
 	.child = NULL,
 	.proc_handler = &proc_dointvec,
-	.strategy = &sysctl_intvec,
 	},
 	{
-	.ctl_name = OOM_EXT_VAL,
 	.procname = "crashflag_name",
 	.data = &crashflag_name,
 	.maxlen = OOM_EXT_FLAG_MAXPATH,
 	.mode = 0644,
 	.child = NULL,
 	.proc_handler = &proc_dostring,
-	.strategy = &sysctl_string,
 	},
-        {0}
+        {}
         };
-
 
 
 /* sysfs directory */
-static ctl_table oom_ext_kern_table[] = {
-        {OOM_EXT_CTL, "oom_ext", NULL, 0, 0555, oom_ext_table},
-        {0}
+static struct ctl_table oom_ext_kern_table[] = {
+	{
+	.procname = "oom_ext",
+	.data = NULL,
+	.maxlen = 0,
+	.mode = 0555,
+	.child = oom_ext_table,
+	},
+        {}
         };
 
 /* the parent directory */
-static ctl_table oom_ext_root_table[] = {
-        {CTL_VM, "vm", NULL, 0, 0555, oom_ext_kern_table},
-        {0}
+static struct ctl_table oom_ext_root_table[] = {
+	{
+	.procname = "vm",
+	.data = NULL,
+	.maxlen = 0,
+	.mode = 0555,
+	.child = oom_ext_kern_table,
+	},
+        {}
         };
 
 static struct ctl_table_header *oom_ext_table_header;
@@ -140,16 +131,9 @@ static struct notifier_block oom_ext_nb = {
 
 static int die = 0;/* set this to 1 for shutdown */
 static struct workqueue_struct *oom_ext_workqueue;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
 static void intrpt_routine(struct work_struct *);
 static DECLARE_DELAYED_WORK(Task, intrpt_routine);
 static void intrpt_routine(struct work_struct* irrelevant)
-#else
-static struct work_struct Task;
-static void intrpt_routine(void *);
-static DECLARE_WORK(Task, intrpt_routine, NULL);
-static void intrpt_routine(void *irrelevant)
-#endif
 {
 	/* 
 	 * if an oom event flag is set, start/update the reset wait
@@ -176,10 +160,12 @@ static void intrpt_routine(void *irrelevant)
 		    oom_ext_reset_wait = 0;
 		    oom_ext_grace_start = 0;
 		    file_done = 0;
-        	    printk (KERN_ALERT "all ok,resetting oom_ext timers\n");
+        	    printk (KERN_ALERT 
+        		    "Out of OOM state for %li seconds, resetting oom_ext timers\n", resettime);
         	    /* attempt to restore buffers */
         	    if (!oom_ext_have_emergency_buffer) {
-        		printk (KERN_INFO "OOM_EXT: re-populating emergency buffer...");
+        		printk (KERN_INFO 
+        			"OOM_EXT: re-populating emergency buffer...");
 			if ( (oom_ext_emergency_buffer 
 					= (char*) vmalloc(bufsize*OOM_EXT_MBYTE)) ) {
 			    for (oom_ext_i=0; 
@@ -188,6 +174,8 @@ static void intrpt_routine(void *irrelevant)
 		    	    }
 		    	    oom_ext_bufsize = bufsize;
 		    	    oom_ext_have_emergency_buffer = 1;
+		    	    printk (KERN_INFO 
+		    		    "OOM_EXT: Done re-populating emergency buffer.\n");
 		    	} else {
 		    	    printk (KERN_ALERT "OOM_EXT: buffer allocation failed\n");
 		    	    printk (KERN_ALERT "OOM_EXT: will retry...");
@@ -211,9 +199,11 @@ static void intrpt_routine(void *irrelevant)
 		    }
 		    oom_ext_bufsize = bufsize;
 		    oom_ext_have_emergency_buffer = 1;
+		    printk (KERN_INFO 
+			    "OOM_EXT: Done re-populating emergency buffer.\n");
 		} else {
 		    printk (KERN_ALERT "OOM_EXT: failed to resize buffer\n");
-		    printk (KERN_ALERT "OOM_EXT: will try old size...\n");
+		    printk (KERN_ALERT "OOM_EXT: will try old size.\n");
 		    bufsize = oom_ext_bufsize;
 		    oom_ext_have_emergency_buffer = 0;
 		}
@@ -261,8 +251,7 @@ int oom_ext_event_handler (struct notifier_block *self,
 
 int init_module(void)
 {
-        oom_ext_table_header = register_sysctl_table(oom_ext_root_table 
-    							    OLD_INSERT_AT_HEAD);
+        oom_ext_table_header = register_sysctl_table(oom_ext_root_table);
 	/* 
 	 * Put the task in the work_timer task queue, so it will be executed at
 	 * next timer interrupt
@@ -280,6 +269,7 @@ int init_module(void)
 		oom_ext_emergency_buffer[oom_ext_i] = '0';
 	    }
 	    oom_ext_have_emergency_buffer = 1;
+	    printk (KERN_INFO "OOM_EXT: Done populating emergency buffer.");
 	} else {
 	    printk (KERN_ALERT "OOM_EXT: buffer allocation failed on init!\n");
 	    printk (KERN_ALERT "OOM_EXT: will not retry.\n");

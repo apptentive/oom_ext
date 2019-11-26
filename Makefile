@@ -1,4 +1,5 @@
-#EXTRA_CFLAGS += -O2 -Wall
+#uncomment to disable tainting and module verification error messages on insmod
+#CONFIG_MODULE_SIG=n
 obj-m += oom_ext.o
 
 all:

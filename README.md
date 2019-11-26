@@ -38,7 +38,7 @@ The module adds a few sysctl's with which it can be configured:
 | Parameter | Description | Default |
 |----------:|:------------|:--------|
 | **vm.oom_ext.gracetime** | time(sec) in OOM state before kernel panic (usable to reboot), 0 to disable panic | `0` |
-| **vm.oom_ext.resettime** | time(sec) out of OOM before recreating emergency buffer | `300` |
+| **vm.oom_ext.resettime** | time(sec) out of OOM before recreating emergency buffer | `30` |
 | **vm.oom_ext.bufsize** | emergency buffer in MB, 0 to disable  | `32` |
 | **vm.oom_ext.crashflag** | set crash flag file on fs, will be removed if oom ended, 0 to disable  | `1` |
 | **vm.oom_ext.crashflag_name** | pathname for crash flag file  | `/oomflag` |
